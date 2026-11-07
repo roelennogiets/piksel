@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#141820">
+<title>Colour Pixel</title>
+<style>
+:root{color-scheme:dark;--bg:#141820;--panel:#202733;--line:#394454;--text:#f4f6fa;--muted:#aeb9c8;--accent:#6b8cff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px system-ui,-apple-system,sans-serif}
+main{max-width:560px;margin:auto;padding:16px;display:flex;flex-direction:column;gap:13px}
+header{display:flex;justify-content:space-between;gap:8px}
+.stat small{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.stat b{font-size:20px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:13px}
+h2{font-size:15px;margin:0 0 10px}
+canvas{display:block}
+#art{width:100%;height:auto;image-rendering:pixelated;border-radius:9px;background:#29313d}
+.colors{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.swatch{height:76px;border-radius:10px;border:1px solid #ffffff30}
+.label{font-size:13px;font-weight:650;margin-bottom:8px}
+#fieldWrap{position:relative;height:min(58vw,270px);min-height:190px;border-radius:12px;overflow:hidden;border:2px solid var(--accent);touch-action:none}
+#field{width:100%;height:100%;touch-action:none;cursor:crosshair}
+.axis{position:absolute;pointer-events:none;color:white;font-size:11px;font-weight:700;text-shadow:0 1px 4px #000;top:7px;left:8px;right:8px;display:flex;justify-content:space-between}
+#marker{position:absolute;width:18px;height:18px;border:2px solid white;border-radius:50%;box-shadow:0 0 0 2px #111;transform:translate(-50%,-50%);pointer-events:none}
+.hint{color:var(--muted);font-size:12px;line-height:1.5}
+.meters{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.meter{background:#141b25;padding:9px;border-radius:9px;font-size:13px}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+button{border:0;border-radius:11px;background:var(--accent);color:white;padding:13px;font-weight:700;font-size:15px}
+button:disabled{opacity:.38}
+#result{text-align:center;min-height:43px;line-height:1.5}
+#bar{height:8px;background:#394454;border-radius:20px;overflow:hidden}
+#barin{height:100%;width:100%;background:#8da5ff}
+@media(min-width:500px){main{padding:22px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+ <div class="stat"><small>Pixel</small><b id="progress">0 / 36</b></div>
+ <div class="stat" style="text-align:center"><small>Gemiddelde</small><b id="average">0%</b></div>
+ <div class="stat" style="text-align:right"><small>Timer</small><b id="time">10.0 s</b></div>
+</header>
+<section class="panel">
+ <h2>Jouw pixeltekening</h2>
+ <canvas id="art" width="180" height="180"></canvas>
+</section>
+<section class="colors">
+ <div class="panel"><div class="label">Referentiekleur</div><div id="target" class="swatch"></div></div>
+ <div class="panel"><div class="label">Jouw kleur</div><div id="mine" class="swatch"></div></div>
+</section>
+<section class="panel">
+ <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h2 style="margin:0">Kleur kiezen</h2><span id="status" class="hint">Klaar</span></div>
+ <div id="bar"><div id="barin"></div></div>
+ <div id="fieldWrap" style="margin-top:11px">
+  <canvas id="field" width="360" height="240"></canvas>
+  <div class="axis"><span>← Minder saturatie</span><span>Meer saturatie →</span></div>
+  <div id="marker"></div>
+ </div>
+ <p class="hint">Sleep je vinger of muis rechtstreeks naar de gewenste kleur. Links/rechts = saturatie. Boven/onder = hue.</p>
+ <div class="meters">
+  <div class="meter">Hue: <b id="hue">180°</b></div>
+  <div class="meter">Saturatie: <b id="sat">50%</b></div>
+ </div>
+ <div id="result" class="hint" aria-live="polite" style="padding:10px 0">Druk op Start pixel om te beginnen.</div>
+ <div class="actions"><button id="start">Start pixel</button><button id="next" disabled>Volgende pixel →</button></div>
+</section>
+</main>
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const pattern=['00111100','01122110','11222211','12222221','12222221','12322321','12222221','01222210','00111100'];
+const palette=[[0,0,0],[0,78,82],[220,68,62],[48,72,48]];
+const cells=[];
+pattern.forEach((r,y)=>[...r].forEach((v,x)=>{if(v!=='0')cells.push({x,y,c:palette[+v]})}));
+const total=cells.length;
+let index=0,hue=180,sat=50,results=[],scores=[],sum=0,playing=false,deadline=0,raf=0;
+const art=$('art'),ctx=art.getContext('2d'),field=$('field'),fx=field.getContext('2d');
+function hsl(h,s,l=50){return `hsl(${h},${s}%,${l}%)`}
+function rgb(h,s,l=50){
+ h=((h%360)+360)%360;
+ const f=n=>{const k=(n+h/30)%12,a=s/100*Math.min(l/100,1-l/100);return (l/100-a*Math.max(-1,Math.min(k-3,9-k,1)))*255};
+ return [f(0),f(8),f(4)];
+}
+function drawArt(){
+ ctx.clearRect(0,0,180,180);ctx.fillStyle='#29313d';ctx.fillRect(0,0,180,180);
+ cells.forEach((p,i)=>{ctx.fillStyle=results[i]||'#596474';ctx.fillRect(p.x*20+1,p.y*20+1,18,18)});
+}
+function drawField(){
+ const w=field.width,ht=field.height,img=fx.createImageData(w,ht);
+ for(let y=0;y<ht;y++)for(let x=0;x<w;x++){
+  const c=rgb(y/(ht-1)*360,x/(w-1)*100);
+  const k=(y*w+x)*4;img.data[k]=c[0];img.data[k+1]=c[1];img.data[k+2]=c[2];img.data[k+3]=255;
+ }
+ fx.putImageData(img,0,0);
+}
+function update(){
+ $('mine').style.background=hsl(hue,sat);
+ $('hue').textContent=Math.round(hue)+'°';$('sat').textContent=Math.round(sat)+'%';
+ const rect=field.getBoundingClientRect();
+ $('marker').style.left=(sat/100*rect.width)+'px';
+ $('marker').style.top=(hue/360*rect.height)+'px';
+}
+function target(){return cells[index].c}
+function accuracy(){
+ const t=target();let dh=Math.abs(hue-t[0]);dh=Math.min(dh,360-dh);
+ return Math.round(Math.max(0,100-55*dh/180-25*Math.abs(sat-t[1])/100-20*Math.abs(50-t[2])/100));
+}
+function startRound(){
+ if(index>=total){restart();return}
+ hue=Math.random()*360;sat=50;playing=true;deadline=performance.now()+10000;
+ $('target').style.background=hsl(...target());$('start').disabled=true;$('next').disabled=true;
+ $('result').textContent='Match de referentiekleur!';$('status').textContent='Bezig';update();cancelAnimationFrame(raf);tick();
+}
+function tick(){
+ if(!playing)return;
+ const left=Math.max(0,deadline-performance.now());
+ $('time').textContent=(left/1000).toFixed(1)+' s';$('barin').style.width=(left/100)+'%';
+ if(left<=0){finish();return}
+ raf=requestAnimationFrame(tick);
+}
+function finish(){
+ playing=false;const score=accuracy();scores[index]=score;sum+=score;results[index]=hsl(hue,sat);drawArt();
+ $('time').textContent='0.0 s';$('barin').style.width='0%';
+ $('result').innerHTML='<b style="font-size:23px">'+score+'% match!</b><br>'+(score>=90?'Uitstekend!':score>=70?'Goed gedaan!':'Volgende pixel!') ;
+ $('status').textContent='Afgerond';$('progress').textContent=(index+1)+' / '+total;
+ $('average').textContent=Math.round(sum/(index+1))+'%';$('next').disabled=false;$('start').disabled=true;
+ $('next').textContent=index===total-1?'Eindresultaat':'Volgende pixel →';
+}
+function restart(){
+ index=0;sum=0;results=[];scores=[];playing=false;drawArt();
+ $('progress').textContent='0 / '+total;$('average').textContent='0%';$('time').textContent='10.0 s';
+ $('start').disabled=false;$('start').textContent='Start pixel';$('next').disabled=true;
+ $('result').textContent='Nieuwe ronde. Veel succes!';$('status').textContent='Klaar';update();
+}
+$('start').addEventListener('click',()=>{if(index>=total)restart();else startRound()});
+$('next').addEventListener('click',()=>{
+ if(index===total-1){
+  $('result').innerHTML='<b style="font-size:23px">Tekening voltooid!</b><br>Gemiddelde score: '+Math.round(sum/total)+'%';
+  $('status').textContent='Voltooid';$('next').disabled=true;$('start').disabled=false;$('start').textContent='Opnieuw spelen';index=total;return;
+ }
+ index++;$('progress').textContent=index+' / '+total;
+ $('target').style.background=hsl(...target());$('next').disabled=true;
+ $('start').disabled=false;$('start').textContent='Start pixel';
+ $('result').textContent='Klaar voor de volgende pixel.';$('status').textContent='Nieuwe pixel';
+});
+function setFromPointer(e){
+ const r=field.getBoundingClientRect();
+ const x=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
+ const y=Math.max(0,Math.min(1,(e.clientY-r.top)/r.height));
+ sat=x*100;hue=y*360;
+ update();
+}
+field.addEventListener('pointerdown',e=>{
+ if(!playing)return;
+ field.setPointerCapture(e.pointerId);
+ setFromPointer(e);
+});
+field.addEventListener('pointermove',e=>{
+ if(!playing||!field.hasPointerCapture(e.pointerId))return;
+ setFromPointer(e);
+});
+field.addEventListener('pointerup',e=>{if(field.hasPointerCapture(e.pointerId))field.releasePointerCapture(e.pointerId)});
+field.addEventListener('pointercancel',()=>{});
+window.addEventListener('resize',update);
+drawArt();drawField();update();
+})();
+</script>
+</body>
+</html>
