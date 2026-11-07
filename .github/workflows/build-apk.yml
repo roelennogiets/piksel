@@ -24,12 +24,23 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Prepare signing key
+        working-directory: ./ColourPixelAndroid/app
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > release-key.jks
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
-      - name: Build APK
+      - name: Build release APK
         working-directory: ./ColourPixelAndroid
-        run: gradle --no-daemon assembleDebug
+        run: gradle --no-daemon assembleRelease
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
       - name: Save APK
         uses: actions/upload-artifact@v4
         with:
-          name: ColourPixel-APK
-          path: ColourPixelAndroid/app/build/outputs/apk/debug/app-debug.apk
+          name: ColourPixel-Release-APK
+          path: ColourPixelAndroid/app/build/outputs/apk/release/app-release.apk
